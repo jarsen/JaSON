@@ -23,6 +23,10 @@ catch {
 }
 ```
 
+## Resources
+
+Check out my series of articles on JSON value extraction at [my blog](http://jasonlarsen.me/2015/10/16/no-magic-json-pt3.html)
+
 And don't forget if you don't like `do/catch` you can always use `try?`... but you will lose error information.
 
 ## Init Your Own Custom Classes
