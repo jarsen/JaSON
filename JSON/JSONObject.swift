@@ -5,17 +5,17 @@ import Foundation
 //
 
 public enum JSONError: ErrorType, CustomStringConvertible {
-    case KeyNotFound(key: JSONKeyType)
-    case NullValue(key: JSONKeyType)
+    case KeyNotFound(key: String)
+    case NullValue(key: String)
     case TypeMismatch(expected: Any, actual: Any)
-    case TypeMismatchWithKey(key: JSONKeyType, expected: Any, actual: Any)
+    case TypeMismatchWithKey(key: String, expected: Any, actual: Any)
     
     public var description: String {
         switch self {
         case let .KeyNotFound(key):
-            return "Key not found: \(key.stringValue)"
+            return "Key not found: \(key)"
         case let .NullValue(key):
-            return "Null Value found at: \(key.stringValue)"
+            return "Null Value found at: \(key)"
         case let .TypeMismatch(expected, actual):
             return "Type mismatch. Expected type \(expected). Got '\(actual)'"
         case let .TypeMismatchWithKey(key, expected, actual):
@@ -25,50 +25,36 @@ public enum JSONError: ErrorType, CustomStringConvertible {
 }
 
 //
-// MARK: - JSONKeyType
+// MARK: - JSONValue
 //
 
-public protocol JSONKeyType: Hashable {
-    var stringValue: String { get }
-}
-
-extension String: JSONKeyType {
-    public var stringValue: String {
-        return self
-    }
-}
-
-//
-// MARK: - JSONValueType
-//
-
-public protocol JSONValueType {
-    typealias ValueType = Self
+public protocol JSONValue {
+    typealias Value = Self
     
-    static func JSONValue(object: Any) throws -> ValueType
+    static func JSONValue(object: Any) throws -> Value
 }
 
-extension JSONValueType {
-    public static func JSONValue(object: Any) throws -> ValueType {
-        guard let objectValue = object as? ValueType else {
-            throw JSONError.TypeMismatch(expected: ValueType.self, actual: object.dynamicType)
+extension JSONValue {
+    public static func JSONValue(object: Any) throws -> Value {
+        guard let objectValue = object as? Value else {
+            throw JSONError.TypeMismatch(expected: Value.self, actual: object.dynamicType)
         }
         return objectValue
     }
 }
 
 //
-// MARK: - JSONValueType Implementations
+// MARK: - JSONValue Implementations
 //
 
-extension String: JSONValueType {}
-extension Int: JSONValueType {}
-extension UInt: JSONValueType {}
-extension Float: JSONValueType {}
-extension Double: JSONValueType {}
-extension Bool: JSONValueType {}
+extension String: JSONValue {}
+extension Int: JSONValue {}
+extension UInt: JSONValue {}
+extension Float: JSONValue {}
+extension Double: JSONValue {}
+extension Bool: JSONValue {}
 
-extension Array where Element: JSONValueType {
+extension Array where Element: JSONValue {
     public static func JSONValue(object: Any) throws -> [Element] {
         guard let anyArray = object as? [AnyObject] else {
             throw JSONError.TypeMismatch(expected: self, actual: object.dynamicType)
@@ -77,7 +63,7 @@ extension Array where Element: JSONValueType {
     }
 }
 
-extension Dictionary: JSONValueType {
+extension Dictionary: JSONValue {
     public static func JSONValue(object: Any) throws -> [Key: Value] {
         guard let objectValue = object as? [Key: Value] else {
             throw JSONError.TypeMismatch(expected: self, actual: object.dynamicType)
@@ -86,7 +72,7 @@ extension Dictionary: JSONValueType {
     }
 }
 
-extension NSURL: JSONValueType {
+extension NSURL: JSONValue {
     public static func JSONValue(object: Any) throws -> NSURL {
         guard let urlString = object as? String, objectValue = NSURL(string: urlString) else {
             throw JSONError.TypeMismatch(expected: self, actual: object.dynamicType)
@@ -95,20 +81,31 @@ extension NSURL: JSONValueType {
     }
 }
 
+extension JSONObject: JSONValue {
+    public static func JSONValue(object: Any) throws -> JSONObject {
+        guard let dictionary = object as? JSONDictionary else {
+            throw JSONError.TypeMismatch(expected: self, actual: object.dynamicType)
+        }
+        
+        return JSONObject(dictionary: dictionary)
+    }
+}
+
 //
 // MARK: - JSONObjectConvertible
 //
 
-public protocol JSONObjectConvertible : JSONValueType {
+public protocol JSONObjectConvertible : JSONValue {
     typealias ConvertibleType = Self
     init(json: JSONObject) throws
 }
 
 extension JSONObjectConvertible {
     public static func JSONValue(object: Any) throws -> ConvertibleType {
-        guard let json = object as? JSONObject else {
-            throw JSONError.TypeMismatch(expected: JSONObject.self, actual: object.dynamicType)
+        guard let jsonDict = object as? JSONDictionary else {
+            throw JSONError.TypeMismatch(expected: JSONDictionary.self, actual: object.dynamicType)
         }
+        let json = JSONObject(dictionary: jsonDict)
         guard let value = try self.init(json: json) as? ConvertibleType else {
             throw JSONError.TypeMismatch(expected: ConvertibleType.self, actual: object.dynamicType)
         }
@@ -117,18 +114,39 @@ extension JSONObjectConvertible {
 }
 
 //
+// MARK: - JSONObjectDeconvertible
+//
+
+public protocol JSONDictionaryConvertible {
+    var JSONDictionaryValue: JSONDictionary { get }
+}
+
+//
 // MARK: - JSONObject
 //
 
-public typealias JSONObject = [String: AnyObject]
+public typealias JSONDictionary = [String: AnyObject]
 
-extension Dictionary where Key: JSONKeyType {
-    private func anyForKey(key: Key) throws -> Any {
-        let pathComponents = key.stringValue.characters.split(".").map(String.init)
-        var accumulator: Any = self
+public struct JSONObject {
+    public var dictionary: JSONDictionary
+    
+    public init?(data: NSData, options: NSJSONReadingOptions = []) throws {
+        guard let dict = try NSJSONSerialization.JSONObjectWithData(data, options: options) as? JSONDictionary else {
+            return nil
+        }
+        self.init(dictionary: dict)
+    }
+    
+    public init(dictionary: JSONDictionary) {
+        self.dictionary = dictionary
+    }
+    
+    private func anyForKey(key: String) throws -> Any {
+        let pathComponents = key.characters.split(".").map(String.init)
+        var accumulator: Any = dictionary
         
         for component in pathComponents {
-            if let componentData = accumulator as? [Key: Value], value = componentData[component as! Key] {
+            if let componentData = accumulator as? JSONDictionary, value = componentData[component] {
                 accumulator = value
                 continue
             }
@@ -143,7 +161,7 @@ extension Dictionary where Key: JSONKeyType {
         return accumulator
     }
     
-    public func JSONValueForKey<A: JSONValueType>(key: Key) throws -> A {
+    public func valueForKey<A: JSONValue>(key: String) throws -> A {
         let any = try anyForKey(key)
         guard let result = try A.JSONValue(any) as? A else {
             throw JSONError.TypeMismatchWithKey(key: key, expected: A.self, actual: any.dynamicType)
@@ -152,14 +170,14 @@ extension Dictionary where Key: JSONKeyType {
         return result
     }
     
-    public func JSONValueForKey<A: JSONValueType>(key: Key) throws -> [A] {
+    public func valueForKey<A: JSONValue>(key: String) throws -> [A] {
         let any = try anyForKey(key)
         return try Array<A>.JSONValue(any)
     }
     
-    public func JSONValueForKey<A: JSONValueType>(key: Key) throws -> A? {
+    public func valueForKey<A: JSONValue>(key: String) throws -> A? {
         do {
-            return try self.JSONValueForKey(key) as A
+            return try self.valueForKey(key) as A
         }
         catch JSONError.KeyNotFound {
             return nil
@@ -170,5 +188,17 @@ extension Dictionary where Key: JSONKeyType {
         catch {
             throw error
         }
+    }
+}
+
+extension JSONObject: CustomStringConvertible {
+    public var description: String {
+        return dictionary.description
+    }
+}
+
+extension JSONObject: CustomDebugStringConvertible {
+    public var debugDescription: String {
+        return dictionary.debugDescription
     }
 }
