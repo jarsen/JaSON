@@ -1,3 +1,6 @@
+NOTE: JaSON has evolved into the far superior [Marshal](https://github.com/utahiosmac/marshal)
+Go use that instead.
+
 # JaSON
 Dead simple and safe JSON value extraction
 
